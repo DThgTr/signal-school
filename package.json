@@ -1,0 +1,34 @@
+{
+  "name": "signal-school",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "test": "tsx --test tests/*.test.ts",
+    "check:server": "tsc --noEmit -p spacetimedb/tsconfig.json",
+    "probe:nvidia": "node --env-file=.env.local scripts/probe-nvidia.mjs",
+    "test:integration": "tsx scripts/integration.ts",
+    "test:browser": "node scripts/browser-check.mjs",
+    "db:start": "node scripts/spacetime.mjs start --listen-addr 127.0.0.1:3000 --non-interactive",
+    "db:publish": "node --env-file=.env.local scripts/spacetime.mjs publish signal-school-local --server http://127.0.0.1:3000 --module-path spacetimedb --yes",
+    "db:generate": "node scripts/spacetime.mjs generate --lang typescript --out-dir src/module_bindings --module-path spacetimedb --yes"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "lucide-react": "^0.468.0",
+    "spacetimedb": "2.14.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.0",
+    "tsx": "^4.20.0",
+    "@playwright/test": "^1.56.0"
+  }
+}
