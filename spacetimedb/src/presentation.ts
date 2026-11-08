@@ -1,4 +1,4 @@
-import type { State, TrainingView } from '../../shared/types';
+import type { State, TrainingView } from './types';
 import { selectNext, scenarioById, availableChoices } from './training';
 
 // The browser receives display data, never the catalog or executable rules.

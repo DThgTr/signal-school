@@ -17,6 +17,15 @@ export const Assessments = __t.object("Assessments", {
 });
 export type Assessments = __Infer<typeof Assessments>;
 
+export const CoachingExpiry = __t.object("CoachingExpiry", {
+  id: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  owner: __t.identity(),
+  exerciseId: __t.string(),
+  attemptId: __t.string(),
+});
+export type CoachingExpiry = __Infer<typeof CoachingExpiry>;
+
 export const Decisions = __t.object("Decisions", {
   id: __t.string(),
   owner: __t.identity(),

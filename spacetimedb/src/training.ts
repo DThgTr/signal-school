@@ -1,5 +1,5 @@
-import type { Skill, Action, Choice, Scenario, Detection, Decision, Exercise, Assessment, Trace, Coaching, State, Selection } from '../../shared/types';
-export type { Skill, Action, Choice, Scenario, Detection, Decision, Exercise, Assessment, Trace, Coaching, State, Selection } from '../../shared/types';
+import type { Skill, Action, Choice, Scenario, Detection, Decision, Exercise, Assessment, Trace, Coaching, State, Selection } from './types';
+export type { Skill, Action, Choice, Scenario, Detection, Decision, Exercise, Assessment, Trace, Coaching, State, Selection } from './types';
 export const SKILLS = ['authority', 'urgency', 'verification'] as const;
 export const LABELS: Record<Skill, string> = { authority: 'Question authority', urgency: 'Resist urgency', verification: 'Verify independently' };
 const scamChoices: Choice[] = [

@@ -1,5 +1,6 @@
 import { schema, table, t, type InferSchema, type ReducerCtx, type ProcedureCtx } from 'spacetimedb/server';
-import { TimeDuration } from 'spacetimedb';
+import { TimeDuration, ScheduleAt } from 'spacetimedb';
+import { COACHING_TIMEOUT_MS, recoverCoaching, ownsCoachingAttempt } from './coaching';
 import { presentTraining } from './presentation';
 import { CATALOG, initialState, startExercise, submitDecision, exitExercise, selectNext, scenarioById, detectScam, type State, type Trace } from './training';
 
@@ -9,7 +10,8 @@ const exercises = table({ name: 'exercises' }, { id: t.string().primaryKey(), ow
 const decisions = table({ name: 'decisions' }, { id: t.string().primaryKey(), owner: t.identity().index('btree'), data: t.string() });
 const assessments = table({ name: 'assessments' }, { id: t.string().primaryKey(), owner: t.identity().index('btree'), data: t.string() });
 const modelUsage = table({ name: 'model_usage' }, { id: t.string().primaryKey(), window: t.u64(), count: t.u32() });
-const db = schema({ learners, scenarios, exercises, decisions, assessments, modelUsage }, { env: { NVIDIA_API_KEY: t.string().optional(), NVIDIA_MODEL: t.string().optional() } });
+const coachingExpiry = table({ name: 'coaching_expiry' }, { id: t.u64().primaryKey().autoInc(), scheduledAt: t.scheduleAt(), owner: t.identity(), exerciseId: t.string(), attemptId: t.string() });
+const db = schema({ learners, scenarios, exercises, decisions, assessments, modelUsage, coachingExpiry }, { env: { NVIDIA_API_KEY: t.string().optional(), NVIDIA_MODEL: t.string().optional(), AI_HOURLY_LIMIT: t.string().optional() } });
 export default db;
 type Schema = InferSchema<typeof db>;
 type Ctx = ReducerCtx<Schema>;
@@ -22,13 +24,35 @@ function save(ctx: Ctx, state: State) {
     if (ctx.db.exercises.id.find(exercise.id)) ctx.db.exercises.id.update(exercise); else ctx.db.exercises.insert(exercise);
   }
 }
-export const init = db.init(ctx => { for (const scenario of CATALOG) ctx.db.scenarios.insert({ id: scenario.id, data: JSON.stringify(scenario) }); });
-export const ensureLearner = db.reducer(ctx => { if (!ctx.db.learners.identity.find(ctx.sender)) save(ctx, initialState()); });
+function syncCatalog(ctx: Ctx) {
+  for (const scenario of CATALOG) {
+    const data = JSON.stringify(scenario);
+    const existing = ctx.db.scenarios.id.find(scenario.id);
+    if (!existing) ctx.db.scenarios.insert({ id: scenario.id, data });
+    else if (existing.data !== data) ctx.db.scenarios.id.update({ id: scenario.id, data });
+  }
+}
+export const init = db.init(syncCatalog);
+export const ensureLearner = db.reducer(ctx => {
+  syncCatalog(ctx);
+  const state = read(ctx);
+  const recovered = recoverCoaching(state, Number(ctx.timestamp.toMillis()));
+  if (!ctx.db.learners.identity.find(ctx.sender) || recovered !== state) save(ctx, recovered);
+});
+export const expireCoaching = db.reducer({ onSchedule: coachingExpiry }, { arg: coachingExpiry.rowType }, (ctx, { arg }) => {
+  const row = ctx.db.learners.identity.find(arg.owner);
+  if (!row) return;
+  const state: State = JSON.parse(row.data);
+  if (!ownsCoachingAttempt(state, arg.exerciseId, arg.attemptId)) return;
+  const recovered = recoverCoaching(state, Number(ctx.timestamp.toMillis()));
+  if (recovered !== state) ctx.db.learners.identity.update({ ...row, data: JSON.stringify(recovered) });
+});
 export const myLearner = db.view({ name: 'my_learner', public: true }, t.option(learners.rowType), ctx => {
   const row = ctx.db.learners.identity.find(ctx.sender);
   return row ? { identity: row.identity, data: JSON.stringify(presentTraining(JSON.parse(row.data))) } : undefined;
 });
 export const start = db.reducer({ control: t.bool() }, (ctx, { control }) => {
+  syncCatalog(ctx);
   const state = read(ctx);
   const id = `${ctx.sender.toHexString()}-${ctx.timestamp.microsSinceUnixEpoch}-${state.revision}`;
   save(ctx, startExercise(state, id, Number(ctx.timestamp.microsSinceUnixEpoch / 1000n), control));
@@ -67,19 +91,31 @@ function inference(ctx: ProcedureCtx<Schema>, model: string, messages: Message[]
 }
 export const coach = db.procedure({ exerciseId: t.string() }, t.string(), (ctx, { exerciseId }) => {
   const model = ctx.env.NVIDIA_MODEL || 'nvidia/nemotron-3.5-bolt-e4b';
+  const attemptId = ctx.newUuidV4().toString();
   const snapshot = ctx.withTx(tx => {
-    const state = read(tx);
+    syncCatalog(tx);
+    const now = Number(tx.timestamp.toMillis());
+    const state = recoverCoaching(read(tx), now);
     if (state.exercise?.id !== exerciseId || state.exercise.status !== 'completed') throw new Error('Complete the current exercise before requesting coaching.');
     if (state.coaching.status === 'live' && state.coaching.exerciseId === exerciseId) return null;
-    const now = Number(tx.timestamp.microsSinceUnixEpoch / 1000n);
+    if (state.coaching.status === 'running') throw new Error('Coaching is already running. Please wait for it to finish or time out.');
     if (state.coaching.startedAt && now - state.coaching.startedAt < 90000) throw new Error('Please wait before retrying coaching.');
     const window = BigInt(Math.floor(now / 3600000));
     const usage = tx.db.modelUsage.id.find('global');
     const count = usage?.window === window ? usage.count : 0;
-    if (count >= 30) throw new Error('The demo’s hourly AI budget is used. Standard training is still available.');
+    const configuredLimit = Number(tx.env.AI_HOURLY_LIMIT || '30');
+    const limit = Number.isInteger(configuredLimit) && configuredLimit >= 1 && configuredLimit <= 1000 ? configuredLimit : 30;
+    if (count >= limit) throw new Error('The demo’s hourly AI budget is used. Standard training is still available.');
+    const learnerKey = `learner:${tx.sender.toHexString()}`;
+    const learnerUsage = tx.db.modelUsage.id.find(learnerKey);
+    const learnerCount = learnerUsage?.window === window ? learnerUsage.count : 0;
+    if (learnerCount >= 10) throw new Error('Your hourly AI coaching limit is reached. You can keep practicing with standard guidance.');
+    const nextLearnerUsage = { id: learnerKey, window, count: learnerCount + 1 };
+    if (learnerUsage) tx.db.modelUsage.id.update(nextLearnerUsage); else tx.db.modelUsage.insert(nextLearnerUsage);
     const nextUsage = { id: 'global', window, count: count + 1 };
     if (usage) tx.db.modelUsage.id.update(nextUsage); else tx.db.modelUsage.insert(nextUsage);
-    state.coaching = { status: 'running', exerciseId, model, startedAt: now };
+    state.coaching = { status: 'running', exerciseId, attemptId, model, startedAt: now };
+    tx.db.coachingExpiry.insert({ id: 0n, scheduledAt: ScheduleAt.time(tx.timestamp.microsSinceUnixEpoch + BigInt(COACHING_TIMEOUT_MS) * 1000n), owner: tx.sender, exerciseId, attemptId });
     state.trace = state.trace.filter(entry => entry.source !== 'nemotron');
     save(tx, state);
     return state;
@@ -99,7 +135,7 @@ export const coach = db.procedure({ exerciseId: t.string() }, t.string(), (ctx, 
       if (!args || Array.isArray(args) || typeof args !== 'object' || Object.keys(args).length) throw new Error('Model returned invalid tool arguments.');
       let output: unknown;
       if (tool.function.name === 'get_learner_profile') output = { scores: snapshot.scores, result: snapshot.history.at(-1), choices: snapshot.exercise!.decisions };
-      else if (tool.function.name === 'get_scenario_catalog') output = ctx.withTx(tx => ({ catalog: [...tx.db.scenarios.iter()].map(row => { const s = JSON.parse(row.data); return { id: s.id, skill: s.skill, difficulty: s.difficulty }; }), next: selectNext(snapshot) }));
+      else if (tool.function.name === 'get_scenario_catalog') output = ctx.withTx(tx => ({ catalog: CATALOG.map(entry => { const s = JSON.parse(tx.db.scenarios.id.find(entry.id)!.data); return { id: s.id, skill: s.skill, difficulty: s.difficulty }; }), next: selectNext(snapshot) }));
       else {
         const catalog = toolResults.get_scenario_catalog as { next: { scenarioId: string } };
         const scenario = scenarioById(catalog.next.scenarioId);
@@ -108,7 +144,8 @@ export const coach = db.procedure({ exerciseId: t.string() }, t.string(), (ctx, 
       toolResults[tool.function.name] = output;
       messages.push({ role: 'assistant', content: reply.content, tool_calls: reply.tool_calls }, { role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });
       trace.push({ tool: tool.function.name, detail: JSON.stringify(output), source: 'nemotron', status: 'ok' });
-      ctx.withTx(tx => { const state = read(tx); if (state.exercise?.id === exerciseId) save(tx, { ...state, trace: [...snapshot.trace, ...trace] }); });
+      const stillCurrent = ctx.withTx(tx => { const state = read(tx); if (!ownsCoachingAttempt(state, exerciseId, attemptId)) return false; save(tx, { ...state, trace: [...snapshot.trace, ...trace] }); return true; });
+      if (!stillCurrent) return 'Coaching superseded or expired';
     }
     const finalTool = definition('personalize_feedback', 'Save two short feedback sentences and exactly one coaching cue for the next exercise.');
     finalTool.function.parameters = {
@@ -125,7 +162,7 @@ export const coach = db.procedure({ exerciseId: t.string() }, t.string(), (ctx, 
     if (typeof output.feedback !== 'string' || output.feedback.length < 10 || output.feedback.length > 600 || !['pause', 'question', 'verify'].includes(output.cue)) throw new Error('Model coaching did not match the bounded output format.');
     ctx.withTx(tx => {
       const state = read(tx);
-      if (state.exercise?.id !== exerciseId) return;
+      if (!ownsCoachingAttempt(state, exerciseId, attemptId)) return;
       save(tx, { ...state, coaching: { ...state.coaching, status: 'live', feedback: output.feedback, cue: output.cue as 'pause' | 'question' | 'verify', model }, trace: [...snapshot.trace, ...trace, { tool: 'personalize_feedback', detail: `Live ${model}; next coaching cue: ${output.cue}`, source: 'nemotron', status: 'ok' }] });
     });
     return 'Live coaching saved';
@@ -133,7 +170,7 @@ export const coach = db.procedure({ exerciseId: t.string() }, t.string(), (ctx, 
     const reason = error instanceof Error ? error.message : 'NVIDIA coaching is unavailable.';
     ctx.withTx(tx => {
       const state = read(tx);
-      if (state.exercise?.id === exerciseId) save(tx, { ...state, coaching: { ...state.coaching, status: 'unavailable', error: reason }, trace: [...snapshot.trace, ...trace, { tool: 'nemotron_workflow', detail: reason, source: 'nemotron', status: 'error' }] });
+      if (ownsCoachingAttempt(state, exerciseId, attemptId)) save(tx, { ...state, coaching: { ...state.coaching, status: 'unavailable', error: reason }, trace: [...snapshot.trace, ...trace, { tool: 'nemotron_workflow', detail: reason, source: 'nemotron', status: 'error' }] });
     });
     return 'Standard coaching retained';
   }

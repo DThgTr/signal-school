@@ -6,13 +6,18 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
+    "build:cloud": "npm run build",
+    "build:local": "tsc --noEmit && vite build --mode development",
     "test": "tsx --test tests/*.test.ts",
     "check:server": "tsc --noEmit -p spacetimedb/tsconfig.json",
     "probe:nvidia": "node --env-file=.env.local scripts/probe-nvidia.mjs",
     "test:integration": "tsx scripts/integration.ts",
+    "test:cloud": "tsx scripts/integration.ts --cloud --ai",
     "test:browser": "node scripts/browser-check.mjs",
     "db:start": "node scripts/spacetime.mjs start --listen-addr 127.0.0.1:3000 --non-interactive",
-    "db:publish": "node --env-file=.env.local scripts/spacetime.mjs publish signal-school-local --server http://127.0.0.1:3000 --module-path spacetimedb --yes",
+    "db:publish": "npm run db:publish:local",
+    "db:publish:local": "node --env-file=.env.local scripts/publish.mjs local",
+    "db:publish:cloud": "node --env-file=.env.local scripts/publish.mjs cloud",
     "db:generate": "node scripts/spacetime.mjs generate --lang typescript --out-dir src/module_bindings --module-path spacetimedb --yes"
   },
   "dependencies": {

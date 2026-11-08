@@ -1,5 +1,5 @@
 import { DbConnection } from './module_bindings';
-import type { TrainingView } from '../shared/types';
+import type { TrainingView } from '../spacetimedb/src/types';
 export type Mode = 'connecting' | 'spacetime' | 'disconnected';
 export type Snapshot = { state: TrainingView | null; mode: Mode; error: string | null };
 const uri = import.meta.env.VITE_SPACETIME_URI || (['localhost', '127.0.0.1'].includes(location.hostname) ? 'ws://127.0.0.1:3000' : '');
@@ -40,7 +40,7 @@ export function connect() {
         conn.reducers.ensureLearner({}).catch(() => fail('Could not load your saved profile. Please reconnect.'));
       }).onError(() => fail('Could not subscribe to your saved profile. Please reconnect.')).subscribe('SELECT * FROM my_learner');
     })
-    .onConnectError(() => fail('Could not reach the training server. Start SpacetimeDB, then reconnect.'))
+    .onConnectError(() => fail('Could not reach the training server. Check your connection and try reconnecting.'))
     .onDisconnect(() => fail('Connection interrupted. Your saved progress is preserved on the server. Reconnecting…'))
     .build();
 }

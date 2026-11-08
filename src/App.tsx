@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ArrowUpRight, ArrowRight, ArrowLeft, ShieldCheck, Fingerprint, Clock3, Check, X, Sparkles, Radio, LockKeyhole, MessageCircle, ChevronDown, RotateCcw, Terminal, CircleHelp, CheckCircle2, AlertTriangle, Pause, Search, PhoneOff, LoaderCircle } from 'lucide-react';
 import { store, type Snapshot } from './client';
-import type { Skill, TrainingView } from '../shared/types';
+import type { Skill, TrainingView } from '../spacetimedb/src/types';
 import { SKILLS, LABELS } from './presentation';
 
 const icons = { authority: ShieldCheck, urgency: Clock3, verification: Fingerprint };

@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import { DbConnection } from '../src/module_bindings';
-import type { TrainingView as State } from '../shared/types';
+import type { TrainingView as State } from '../spacetimedb/src/types';
+import { readFileSync } from 'node:fs';
+const target = process.argv.includes('--cloud') ? 'cloud' : 'local';
+const deployment = JSON.parse(readFileSync(new URL('../deployments.json', import.meta.url), 'utf8'))[target];
+console.log(`Testing ${target}: ${deployment.server} / ${deployment.database}`);
 
 async function open(token?: string) {
   let sessionToken = '';
   const conn = await new Promise<DbConnection>((resolve, reject) => {
-    DbConnection.builder().withUri('ws://127.0.0.1:3000').withDatabaseName('signal-school-local').withToken(token)
+    DbConnection.builder().withUri(deployment.server).withDatabaseName(deployment.database).withToken(token)
       .onConnect((c, _identity, t) => { sessionToken = t; resolve(c); })
       .onConnectError((_c, e) => reject(e)).build();
   });

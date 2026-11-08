@@ -1,0 +1,4 @@
+{
+  "local": { "server": "http://127.0.0.1:3000", "database": "signal-school-local" },
+  "cloud": { "server": "https://maincloud.spacetimedb.com", "database": "signal-school-fraud-prep-2026" }
+}

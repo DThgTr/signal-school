@@ -38,7 +38,7 @@ React + Vite UI
   → coach procedure → NVIDIA Nemotron Bolt API
 ```
 
-All scenarios, scoring, session progression, detector invocation, and adaptation live in `spacetimedb/src/training.ts` and execute only on the backend. `spacetimedb/src/presentation.ts` prepares the current messages, legal choices, and next-exercise explanation for the UI. `shared/types.ts` contains TypeScript data contracts only. The frontend renders server data and submits actions; it cannot run training offline. There is no second API backend.
+All scenarios, scoring, session progression, detector invocation, and adaptation live in `spacetimedb/src/training.ts` and execute only on the backend. `spacetimedb/src/presentation.ts` prepares the current messages, legal choices, and next-exercise explanation for the UI. Backend-owned contracts live in `spacetimedb/src/types.ts`; the frontend imports them as types only. The backend folder is self-contained. The frontend renders server data and submits actions; it cannot run training offline. There is no second API backend.
 
 The app uses structured response buttons. Asking for details opens a second decision; protective or risky choices end the exercise immediately. A protective choice adds 10 to one target skill, a risky one subtracts 10, and refusal without verification in the legitimate control changes nothing. Scores clamp to 0–100. Repeated submissions cannot double-score. Exit does not score.
 
@@ -68,20 +68,31 @@ npm run test:integration -- --ai
 npm run test:browser
 ```
 
-Integration and browser tests require the published local database; the browser test also requires Vite on port 5173 and installed Microsoft Edge. They use fresh synthetic identities and make live NVIDIA calls. Unit tests check adaptation, detector control behavior, clamping, stale decisions, duplicate submissions, and exit. Integration checks cover persistence across reconnection and isolation between learner identities. Browser checks cover desktop/mobile layouts, two-turn decisions, refresh, live AI, adaptation, the legitimate control, reset, and refusal to train without a backend. Local screenshots are stored under ignored `.runtime/screenshots/`.
+Local integration and browser tests require the published local database; the browser test also requires Vite on port 5173 and installed Microsoft Edge. For Maincloud, use `npm run test:cloud`, then `npm run build:cloud` and `npm run test:browser -- --cloud`. The cloud browser test serves the exact production artifact and connects to the real Maincloud backend. Tests use fresh synthetic identities and make live NVIDIA calls. Unit tests check adaptation, detector control behavior, clamping, stale decisions, duplicate submissions, exit, coaching timeout recovery, and stale AI attempts. Integration checks cover persistence across reconnection and isolation between learner identities. Browser checks cover desktop/mobile layouts, two-turn decisions, refresh, live AI, adaptation, the legitimate control, reset, and refusal to train without a backend. Local screenshots are stored under ignored `.runtime/screenshots/`.
 
 After changing the module schema, run `npm run db:generate`. Generated bindings are committed source, not hand-maintained stubs.
 
 ## Hosting and provisioning
 
-The full live demo currently runs locally. The static Sites publication requires a hosted backend: without `VITE_SPACETIME_URI`, it shows “Training server unavailable.” Browser-only practice has been removed. A disconnected client cannot start, score, or advance an exercise. The browser stores only its identity token; saved training progress belongs to SpacetimeDB. Legacy browser-only progress is ignored.
+The backend is deployed to [SpacetimeDB Maincloud](https://spacetimedb.com/signal-school-fraud-prep-2026). The [private website](https://signal-school-fraud-prep.breezy-tide-1043.chatgpt.site) connects directly to it. Your laptop does not need to run a server. NVIDIA requests originate in the Maincloud procedure, and its key is stored only in the server environment.
 
-For a fully hosted demo:
+`deployments.json` names separate local and cloud targets. `npm run dev` uses localhost; `npm run build` (also `build:cloud`) embeds the Maincloud target even if development environment overrides exist. `npm run build:local` produces a development-target build. To deploy backend changes:
 
-1. Sign in to a SpacetimeDB account and choose a Maincloud database you own. This is the remaining account-level provisioning step; no account credentials are stored in this repository.
-2. Publish the module to that database with the same server-only environment variables. Use `node --env-file=.env.local scripts/spacetime.mjs publish YOUR_DATABASE --server maincloud --module-path spacetimedb` after signing in with this project's CLI root.
-3. Set the public frontend values `VITE_SPACETIME_URI=wss://maincloud.spacetimedb.com` and `VITE_SPACETIME_DATABASE=YOUR_DATABASE` before building and republishing the Site.
-4. Re-run an actual exercise and verify server storage plus live coaching. Do not point a hosted frontend to a localhost backend.
+```powershell
+# Once per machine/account, using this project's isolated CLI configuration:
+node scripts/spacetime.mjs login
+npm run db:publish:cloud
+npm run test:cloud
+npm run build:cloud
+```
+
+Cloud publishing requires `NVIDIA_API_KEY` in `.env.local`, type-checks the backend, and refuses destructive data replacement. `npm run db:publish:local` explicitly targets the local server; `db:publish` is its compatibility alias. Frontend changes must also be republished through the existing private Sites project. Local `.env.local` edits do not update Maincloud until publishing again.
+
+Interrupted coaching expires after two minutes via a scheduled reducer and is also recovered on reconnect. Attempt IDs prevent late responses from overwriting retries or newer exercises. The active scenario catalog synchronizes on connection/start/coaching after module updates. Existing in-flight exercises use the current compiled scenario definitions, so preserve scenario IDs/choice IDs when deploying catalog changes during a demo.
+
+There is a per-identity cap of 10 coaching workflows/hour and a global default cap of 30 (configurable with server-only `AI_HOURLY_LIMIT`). Reset does not clear either quota. The Maincloud API accepts anonymous learners; the private website gate does not make the database endpoint owner-only. Sender-scoped data isolation protects profiles, while anonymous identity rotation can still exhaust the shared AI budget. Public release would need stronger user admission/rate limiting.
+
+A disconnected client cannot start, score, or advance an exercise. The browser stores only its identity token; saved training progress belongs to SpacetimeDB. Legacy browser-only progress is ignored. Local identities and practice history are separate from Maincloud; no local data was migrated.
 
 No T-Mobile sample files or supplied classifier were available in the workspace. If supplied, replace the backend text-only detector behind the existing `detectScam(text)` boundary, preserve uncertainty, and test legitimate controls. No other third-party infrastructure is necessary.
 
@@ -100,7 +111,7 @@ No T-Mobile sample files or supplied classifier were available in the workspace.
 | --- | --- | --- |
 | T-Mobile Safe Signal | Real detector invocation, synthetic scam/control scenarios, explicit safer actions, uncertainty | Demonstration rules only; no supplied sponsor classifier |
 | NVIDIA Nemotron | Actual Bolt inference, three sequential tool calls with returned results used downstream, persisted personalized coaching | Free API availability/rate limits; fallback clearly labeled |
-| Spacetime | All connected backend logic, private data, transactions, views, and outbound AI procedure | Fully hosted backend requires account provisioning |
+| Spacetime | Maincloud-hosted training logic, private data, transactions, views, timeout recovery, and outbound AI procedure | Anonymous demo identities; shared AI budget and hosting availability |
 
 This is training practice, not validated fraud prevention. No real messages, calls, payments, or customer data are used. API keys, browser identity tokens, and server signing keys must remain private. The Sites source repository is separate from the GitHub `origin`; public GitHub publication and submission are not performed automatically.
 

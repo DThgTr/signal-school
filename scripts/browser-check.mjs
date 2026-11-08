@@ -3,12 +3,35 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 await mkdir('.runtime/screenshots', { recursive: true });
+const cloud = process.argv.includes('--cloud');
+const hostedUrl = process.argv.find(arg => arg.startsWith('--url='))?.slice(6);
+let bearer;
+if (process.argv.includes('--auth-stdin')) {
+  process.stdin.setRawMode?.(true);
+  console.log('Ready for hidden authentication JSON on stdin.');
+  let input = '';
+  for await (const chunk of process.stdin) { input += chunk; if (input.includes('\n')) break; }
+  process.stdin.setRawMode?.(false);
+  bearer = JSON.parse(input).bearer;
+}
+async function serveBuild(page) {
+  await page.route('https://preview.test/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    const base = resolve('dist');
+    const file = resolve(base, '.' + (path === '/' ? '/index.html' : path));
+    if (!file.startsWith(base + sep)) return route.abort();
+    const contentType = ({ '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css' })[extname(file)] || 'application/octet-stream';
+    await route.fulfill({ status: 200, contentType, body: await readFile(file) });
+  });
+}
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto('http://127.0.0.1:5173/');
+  if (cloud && !hostedUrl) await serveBuild(page);
+  if (hostedUrl && bearer) await page.route(new URL(hostedUrl).origin + '/**', route => route.continue({ headers: { ...route.request().headers(), 'OAI-Sites-Authorization': `Bearer ${bearer}` } }));
+  await page.goto(hostedUrl || (cloud ? 'https://preview.test/' : 'http://127.0.0.1:5173/'));
   await page.getByText('Progress saved to SpacetimeDB', { exact: true }).waitFor();
   await page.screenshot({ path: '.runtime/screenshots/home-desktop.png', fullPage: true });
   await page.getByRole('button', { name: 'Start training', exact: true }).click();
@@ -39,14 +62,8 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS: desktop/mobile UI, two-turn flow, refresh, real AI coaching, adaptation, legitimate control, reset, no page errors');
   const preview = await browser.newPage();
-  await preview.route('https://preview.test/**', async route => {
-    const path = new URL(route.request().url()).pathname;
-    const base = resolve('dist');
-    const file = resolve(base, '.' + (path === '/' ? '/index.html' : path));
-    if (!file.startsWith(base + sep)) return route.abort();
-    const contentType = ({ '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css' })[extname(file)] || 'application/octet-stream';
-    await route.fulfill({ status: 200, contentType, body: await readFile(file) });
-  });
+  await serveBuild(preview);
+  await preview.routeWebSocket('**/v1/database/**', socket => socket.close());
   await preview.goto('https://preview.test/');
   await preview.getByRole('heading', { name: 'Training server unavailable' }).waitFor();
   assert.equal(await preview.getByRole('button', { name: 'Start training', exact: true }).count(), 0);
@@ -54,7 +71,7 @@ try {
   await preview.evaluate(() => localStorage.setItem('signal-school-practice-v1', JSON.stringify({version:1,scores:{authority:100,urgency:100,verification:100},history:[],trace:[]})));
   await preview.reload();
   await preview.getByRole('heading', { name: 'Training server unavailable' }).waitFor();
-  console.log('PASS: unconfigured production site cannot train or load legacy browser-only progress');
+  console.log('PASS: disconnected production site cannot train or load legacy browser-only progress');
   await page.routeWebSocket('**/v1/database/**', socket => socket.close());
   await page.reload();
   await page.getByRole('heading', { name: 'Training server unavailable' }).waitFor();

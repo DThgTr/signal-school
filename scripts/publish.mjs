@@ -1,0 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
+const target = process.argv[2];
+if (!['local', 'cloud'].includes(target)) throw new Error('Choose local or cloud explicitly.');
+const config = JSON.parse(readFileSync(new URL('../deployments.json', import.meta.url), 'utf8'))[target];
+if (target === 'cloud' && !process.env.NVIDIA_API_KEY?.trim()) throw new Error('NVIDIA_API_KEY is required for cloud publishing.');
+const checked = spawnSync(process.execPath, [resolve('node_modules/typescript/bin/tsc'), '--noEmit', '-p', 'spacetimedb/tsconfig.json'], { stdio: 'inherit' });
+if (checked.status !== 0) process.exit(checked.status || 1);
+console.log(`Publishing ${config.database} to ${config.server}`);
+const result = spawnSync(process.execPath, ['scripts/spacetime.mjs', 'publish', config.database, '--server', config.server, '--module-path', 'spacetimedb', '--delete-data=never', '--yes=remote,skip-login,migrate'], { stdio: 'inherit', env: process.env });
+process.exit(result.status ?? 1);
