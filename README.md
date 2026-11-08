@@ -55,7 +55,7 @@ After the reducer has saved the completed result, the client requests the `coach
 3. The model calls `classify_scam`. The application uses the preceding selection to run the text-only detector on that next scenario.
 4. The model consumes the returned evidence and calls `personalize_feedback` with short personalized feedback and a bounded coaching cue (`pause`, `question`, or `verify`). The tool schema enumerates allowed cues; the server validates and saves the result. The cue carries into the next exercise.
 
-The model cannot modify scores or select an unsupported scenario. Real calls and outputs are shown in the expandable trace. Standard guidance remains available during errors; it is never labeled as live AI. There are at most four model requests per coaching attempt, 512 output tokens per request, a 20-second HTTP timeout per request, a 90-second per-exercise retry cooldown, and a global cap of 30 workflows per hour. Reset does not clear the global quota. AI completion is discarded if the learner has moved on to another exercise.
+The model cannot modify scores or select an unsupported scenario. Real calls and outputs are shown in the expandable trace. Standard guidance remains available during errors; it is never labeled as live AI. There are at most four model requests per coaching attempt, 512 output tokens per request, and a 20-second HTTP timeout per request. There are no application-imposed hourly quotas or retry cooldowns; duplicate requests for an already-running or completed coaching attempt are still prevented. AI completion is discarded if the learner has moved on to another exercise.
 
 ## Verification
 
@@ -90,7 +90,7 @@ Cloud publishing requires `NVIDIA_API_KEY` in `.env.local`, type-checks the back
 
 Interrupted coaching expires after two minutes via a scheduled reducer and is also recovered on reconnect. Attempt IDs prevent late responses from overwriting retries or newer exercises. The active scenario catalog synchronizes on connection/start/coaching after module updates. Existing in-flight exercises use the current compiled scenario definitions, so preserve scenario IDs/choice IDs when deploying catalog changes during a demo.
 
-There is a per-identity cap of 10 coaching workflows/hour and a global default cap of 30 (configurable with server-only `AI_HOURLY_LIMIT`). Reset does not clear either quota. The Maincloud API accepts anonymous learners; the private website gate does not make the database endpoint owner-only. Sender-scoped data isolation protects profiles, while anonymous identity rotation can still exhaust the shared AI budget. Public release would need stronger user admission/rate limiting.
+There are no application-imposed coaching quotas. NVIDIA service limits still apply. The Maincloud API accepts anonymous learners; the private website gate does not make the database endpoint owner-only. Sender-scoped data isolation protects profiles.
 
 A disconnected client cannot start, score, or advance an exercise. The browser stores only its identity token; saved training progress belongs to SpacetimeDB. Legacy browser-only progress is ignored. Local identities and practice history are separate from Maincloud; no local data was migrated.
 
@@ -111,7 +111,7 @@ No T-Mobile sample files or supplied classifier were available in the workspace.
 | --- | --- | --- |
 | T-Mobile Safe Signal | Real detector invocation, synthetic scam/control scenarios, explicit safer actions, uncertainty | Demonstration rules only; no supplied sponsor classifier |
 | NVIDIA Nemotron | Actual Bolt inference, three sequential tool calls with returned results used downstream, persisted personalized coaching | Free API availability/rate limits; fallback clearly labeled |
-| Spacetime | Maincloud-hosted training logic, private data, transactions, views, timeout recovery, and outbound AI procedure | Anonymous demo identities; shared AI budget and hosting availability |
+| Spacetime | Maincloud-hosted training logic, private data, transactions, views, timeout recovery, and outbound AI procedure | Anonymous demo identities; provider limits and hosting availability |
 
 This is training practice, not validated fraud prevention. No real messages, calls, payments, or customer data are used. API keys, browser identity tokens, and server signing keys must remain private. The Sites source repository is separate from the GitHub `origin`; public GitHub publication and submission are not performed automatically.
 
