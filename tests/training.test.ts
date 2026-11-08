@@ -1,7 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { initialState, startExercise, submitDecision, selectNext, detectScam, CATALOG, exitExercise } from '../shared/training';
+import { initialState, startExercise, submitDecision, selectNext, detectScam, CATALOG, exitExercise } from '../spacetimedb/src/training';
+import { presentTraining } from '../spacetimedb/src/presentation';
 const start = () => startExercise(initialState(), 'exercise-1', 1);
+test('backend supplies display data without answer metadata or future messages', () => {
+  const view = presentTraining(start());
+  assert.equal(view.next.title, 'The account alert');
+  assert.equal(view.messages.length, 1);
+  assert.equal(view.choices.length, 3);
+  assert.ok(view.choices.every(choice => !('action' in choice)));
+  assert.ok(view.scenario && !('isScam' in view.scenario) && !('followup' in view.scenario));
+  const questioned = presentTraining(submitDecision(start(), 'exercise-1', 'question', 0, 2));
+  assert.equal(questioned.messages.length, 3);
+  const complete = presentTraining(submitDecision(start(), 'exercise-1', 'verify', 0, 2));
+  assert.equal(complete.choices.length, 0);
+  assert.equal(complete.next.skill, 'urgency');
+  assert.equal(complete.history[0].title, 'The account alert');
+});
 test('contrasting choices produce different saved scores and next exercises', () => {
   const safe = submitDecision(start(), 'exercise-1', 'verify', 0, 2);
   const risky = submitDecision(start(), 'exercise-1', 'comply', 0, 2);

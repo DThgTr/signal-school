@@ -1,9 +1,7 @@
+import type { Skill, Action, Choice, Scenario, Detection, Decision, Exercise, Assessment, Trace, Coaching, State, Selection } from '../../shared/types';
+export type { Skill, Action, Choice, Scenario, Detection, Decision, Exercise, Assessment, Trace, Coaching, State, Selection } from '../../shared/types';
 export const SKILLS = ['authority', 'urgency', 'verification'] as const;
-export type Skill = typeof SKILLS[number];
 export const LABELS: Record<Skill, string> = { authority: 'Question authority', urgency: 'Resist urgency', verification: 'Verify independently' };
-export type Action = 'verify' | 'comply' | 'question' | 'decline';
-export type Choice = { id: string; text: string; action: Action };
-export type Scenario = { id: string; title: string; subtitle: string; caller: string; skill: Skill; difficulty: 1 | 2; isScam: boolean; opening: string; followup: string; choices: Choice[]; finalChoices: Choice[]; lesson: string };
 const scamChoices: Choice[] = [
   { id: 'verify', text: 'End this chat and contact them through a source I already trust.', action: 'verify' },
   { id: 'question', text: 'Ask for more details before deciding.', action: 'question' },
@@ -46,7 +44,6 @@ export const CATALOG: Scenario[] = [
     finalChoices: [ { id: 'verify', text: 'Use my existing invoice to verify, then reschedule if confirmed.', action: 'verify' }, { id: 'comply', text: 'Assume the sender is legitimate without checking.', action: 'comply' }, { id: 'decline', text: 'Ignore it without checking the appointment.', action: 'decline' } ],
     lesson: 'Urgency alone does not prove fraud. Verify through an independent source, then decide whether to act.' },
 ];
-export type Detection = { label: 'High risk' | 'Some risk signals' | 'No strong signals'; reasons: { signal: string; evidence: string }[]; baseline: true };
 // The detector receives text only. It cannot read the scenario's known label.
 export function detectScam(text: string): Detection {
   const rules: [string, RegExp, number][] = [
@@ -65,13 +62,6 @@ export function detectScam(text: string): Detection {
   }
   return { label: score >= 4 ? 'High risk' : score > 0 ? 'Some risk signals' : 'No strong signals', reasons, baseline: true };
 }
-export type Decision = { optionId: string; text: string; action: Action; turn: number };
-export type Exercise = { id: string; scenarioId: string; status: 'active' | 'completed' | 'exited'; decisions: Decision[]; startedAt: number; completedAt?: number; cue?: 'pause' | 'question' | 'verify' };
-export type Assessment = { exerciseId: string; scenarioId: string; skill: Skill; outcome: 'protective' | 'risky' | 'incomplete'; oldScore: number; newScore: number; delta: number; feedback: string; detection: Detection; completedAt: number };
-export type Trace = { tool: string; detail: string; source: 'application' | 'nemotron'; status: 'ok' | 'error' };
-export type Coaching = { status: 'idle' | 'running' | 'live' | 'unavailable'; exerciseId?: string; feedback?: string; cue?: 'pause' | 'question' | 'verify'; model?: string; error?: string; startedAt?: number };
-export type State = { version: 1; scores: Record<Skill, number>; exercise: Exercise | null; history: Assessment[]; trace: Trace[]; coaching: Coaching; revision: number };
-export type Selection = { scenarioId: string; skill: Skill; rationale: string; difficulty: number };
 export function initialState(): State { return { version: 1, scores: { authority: 50, urgency: 50, verification: 50 }, exercise: null, history: [], trace: [], coaching: { status: 'idle' }, revision: 0 }; }
 export function scenarioById(id: string) { const scenario = CATALOG.find(s => s.id === id); if (!scenario) throw new Error('Unknown exercise.'); return scenario; }
 export function selectNext(state: State): Selection {

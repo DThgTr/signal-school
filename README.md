@@ -38,7 +38,7 @@ React + Vite UI
   → coach procedure → NVIDIA Nemotron Bolt API
 ```
 
-All scoring, session progression, persistence, detector invocation, and selection run inside SpacetimeDB in connected mode. The domain functions in `shared/training.ts` are also used by an explicitly labeled browser practice mode. There is no second API backend.
+All scenarios, scoring, session progression, detector invocation, and adaptation live in `spacetimedb/src/training.ts` and execute only on the backend. `spacetimedb/src/presentation.ts` prepares the current messages, legal choices, and next-exercise explanation for the UI. `shared/types.ts` contains TypeScript data contracts only. The frontend renders server data and submits actions; it cannot run training offline. There is no second API backend.
 
 The app uses structured response buttons. Asking for details opens a second decision; protective or risky choices end the exercise immediately. A protective choice adds 10 to one target skill, a risky one subtracts 10, and refusal without verification in the legitimate control changes nothing. Scores clamp to 0–100. Repeated submissions cannot double-score. Exit does not score.
 
@@ -53,7 +53,7 @@ After the reducer has saved the completed result, the client requests the `coach
 1. The model returns a `get_learner_profile` tool call. The application returns stored scores, the actual decisions, and the deterministic result.
 2. The model sees that result and calls `get_scenario_catalog`. The application reads the stored catalog and returns the deterministic next selection.
 3. The model calls `classify_scam`. The application uses the preceding selection to run the text-only detector on that next scenario.
-4. The model consumes the returned evidence and produces short personalized feedback and a bounded coaching cue (`pause`, `question`, or `verify`). The cue carries into the next exercise.
+4. The model consumes the returned evidence and calls `personalize_feedback` with short personalized feedback and a bounded coaching cue (`pause`, `question`, or `verify`). The tool schema enumerates allowed cues; the server validates and saves the result. The cue carries into the next exercise.
 
 The model cannot modify scores or select an unsupported scenario. Real calls and outputs are shown in the expandable trace. Standard guidance remains available during errors; it is never labeled as live AI. There are at most four model requests per coaching attempt, 512 output tokens per request, a 20-second HTTP timeout per request, a 90-second per-exercise retry cooldown, and a global cap of 30 workflows per hour. Reset does not clear the global quota. AI completion is discarded if the learner has moved on to another exercise.
 
@@ -68,13 +68,13 @@ npm run test:integration -- --ai
 npm run test:browser
 ```
 
-Integration and browser tests require the published local database; the browser test also requires Vite on port 5173 and installed Microsoft Edge. They use fresh synthetic identities and make live NVIDIA calls. Unit tests check adaptation, detector control behavior, clamping, stale decisions, duplicate submissions, and exit. Integration checks cover persistence across reconnection and isolation between learner identities. Browser checks cover desktop/mobile layouts, two-turn decisions, refresh, live AI, adaptation, the legitimate control, and reset. Local screenshots are stored under ignored `.runtime/screenshots/`.
+Integration and browser tests require the published local database; the browser test also requires Vite on port 5173 and installed Microsoft Edge. They use fresh synthetic identities and make live NVIDIA calls. Unit tests check adaptation, detector control behavior, clamping, stale decisions, duplicate submissions, and exit. Integration checks cover persistence across reconnection and isolation between learner identities. Browser checks cover desktop/mobile layouts, two-turn decisions, refresh, live AI, adaptation, the legitimate control, reset, and refusal to train without a backend. Local screenshots are stored under ignored `.runtime/screenshots/`.
 
 After changing the module schema, run `npm run db:generate`. Generated bindings are committed source, not hand-maintained stubs.
 
 ## Hosting and provisioning
 
-The full live demo currently runs locally. A static Sites publication without `VITE_SPACETIME_URI` runs browser practice with explicit labeling: local storage, deterministic guidance, no live NVIDIA calls. It does not demonstrate the NVIDIA or Spacetime sponsor integrations.
+The full live demo currently runs locally. The static Sites publication requires a hosted backend: without `VITE_SPACETIME_URI`, it shows “Training server unavailable.” Browser-only practice has been removed. A disconnected client cannot start, score, or advance an exercise. The browser stores only its identity token; saved training progress belongs to SpacetimeDB. Legacy browser-only progress is ignored.
 
 For a fully hosted demo:
 
@@ -83,7 +83,7 @@ For a fully hosted demo:
 3. Set the public frontend values `VITE_SPACETIME_URI=wss://maincloud.spacetimedb.com` and `VITE_SPACETIME_DATABASE=YOUR_DATABASE` before building and republishing the Site.
 4. Re-run an actual exercise and verify server storage plus live coaching. Do not point a hosted frontend to a localhost backend.
 
-No T-Mobile sample files or supplied classifier were available in the workspace. If supplied, replace the text-only detector behind the existing `detectScam(text)` boundary, preserve uncertainty, and test legitimate controls. No other third-party infrastructure is necessary.
+No T-Mobile sample files or supplied classifier were available in the workspace. If supplied, replace the backend text-only detector behind the existing `detectScam(text)` boundary, preserve uncertainty, and test legitimate controls. No other third-party infrastructure is necessary.
 
 ## Demo (about 90 seconds)
 

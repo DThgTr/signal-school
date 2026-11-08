@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { DbConnection } from '../src/module_bindings';
-import { selectNext, type State } from '../shared/training';
+import type { TrainingView as State } from '../shared/types';
 
 async function open(token?: string) {
   let sessionToken = '';
@@ -31,7 +31,9 @@ try {
   await a.conn.reducers.decide({ exerciseId: id, optionId: 'comply', turn: 0 });
   const complete = await waitFor(a.conn, s => s.exercise?.status === 'completed');
   assert.equal(complete.scores.authority, 40);
-  assert.equal(selectNext(complete).skill, 'authority');
+  assert.equal(complete.next.skill, 'authority');
+  assert.equal(complete.choices.length, 0);
+  assert.equal(complete.history[0].title, 'The account alert');
   await a.conn.reducers.decide({ exerciseId: id, optionId: 'comply', turn: 0 });
   assert.equal((await waitFor(a.conn, s => s.history.length === 1)).scores.authority, 40);
   console.log('PASS: actual reducer scoring, adaptation, and idempotency');
@@ -55,7 +57,7 @@ try {
   }
   await resumed.conn.reducers.start({ control: false });
   const next = await waitFor(resumed.conn, s => s.exercise?.status === 'active');
-  assert.equal(next.exercise!.scenarioId, selectNext(complete).scenarioId);
+  assert.equal(next.exercise!.scenarioId, complete.next.scenarioId);
   console.log('PASS: next exercise uses saved weakness');
   await resumed.conn.reducers.reset({});
   await b.conn.reducers.reset({});

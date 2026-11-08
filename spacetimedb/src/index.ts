@@ -1,6 +1,7 @@
 import { schema, table, t, type InferSchema, type ReducerCtx, type ProcedureCtx } from 'spacetimedb/server';
 import { TimeDuration } from 'spacetimedb';
-import { CATALOG, initialState, startExercise, submitDecision, exitExercise, selectNext, scenarioById, detectScam, type State, type Trace } from '../../shared/training';
+import { presentTraining } from './presentation';
+import { CATALOG, initialState, startExercise, submitDecision, exitExercise, selectNext, scenarioById, detectScam, type State, type Trace } from './training';
 
 const learners = table({ name: 'learners' }, { identity: t.identity().primaryKey(), data: t.string() });
 const scenarios = table({ name: 'scenarios' }, { id: t.string().primaryKey(), data: t.string() });
@@ -23,7 +24,10 @@ function save(ctx: Ctx, state: State) {
 }
 export const init = db.init(ctx => { for (const scenario of CATALOG) ctx.db.scenarios.insert({ id: scenario.id, data: JSON.stringify(scenario) }); });
 export const ensureLearner = db.reducer(ctx => { if (!ctx.db.learners.identity.find(ctx.sender)) save(ctx, initialState()); });
-export const myLearner = db.view({ name: 'my_learner', public: true }, t.option(learners.rowType), ctx => ctx.db.learners.identity.find(ctx.sender) ?? undefined);
+export const myLearner = db.view({ name: 'my_learner', public: true }, t.option(learners.rowType), ctx => {
+  const row = ctx.db.learners.identity.find(ctx.sender);
+  return row ? { identity: row.identity, data: JSON.stringify(presentTraining(JSON.parse(row.data))) } : undefined;
+});
 export const start = db.reducer({ control: t.bool() }, (ctx, { control }) => {
   const state = read(ctx);
   const id = `${ctx.sender.toHexString()}-${ctx.timestamp.microsSinceUnixEpoch}-${state.revision}`;
@@ -84,7 +88,7 @@ export const coach = db.procedure({ exerciseId: t.string() }, t.string(), (ctx, 
   const trace: Trace[] = [];
   try {
     if (!ctx.env.NVIDIA_API_KEY) throw new Error('NVIDIA API key is not configured on the server.');
-    const messages: Message[] = [{ role: 'system', content: 'You are a calm anti-scam training coach. All exercises are fictional. Use the provided tools in order; use returned facts downstream. Scores and next skill are deterministic and cannot be changed. Do not request money, personal data, passwords, links, or real contact details. After the tools, return ONLY JSON: {"feedback":"at most two short sentences grounded in the recorded decision", "cue":"pause|question|verify"}. The cue customizes coaching for the next exercise. Do not imply proven protection.' }, { role: 'user', content: 'Review my completed exercise, consult my saved profile and next exercise, check its scam signals, and personalize my next practice.' }];
+    const messages: Message[] = [{ role: 'system', content: 'You are a calm anti-scam training coach. All exercises are fictional. Use the provided tools in order; use returned facts downstream. Scores and next skill are deterministic and cannot be changed. Do not request money, personal data, passwords, links, or real contact details. After reading the tool results, call personalize_feedback with at most two short feedback sentences and one cue: pause, question, or verify. The cue customizes coaching for the next exercise. Do not imply proven protection.' }, { role: 'user', content: 'Review my completed exercise, consult my saved profile and next exercise, check its scam signals, and personalize my next practice.' }];
     const toolResults: Record<string, unknown> = {};
     const steps = [definition('get_learner_profile', 'Read saved scores, the recorded result, and the actual chosen actions.'), definition('get_scenario_catalog', 'Read the available scenario catalog and next exercise selected from the saved weakest skill.'), definition('classify_scam', 'Run the separate demonstration detector on the next fictional scenario text.')];
     for (const tool of steps) {
@@ -106,8 +110,18 @@ export const coach = db.procedure({ exerciseId: t.string() }, t.string(), (ctx, 
       trace.push({ tool: tool.function.name, detail: JSON.stringify(output), source: 'nemotron', status: 'ok' });
       ctx.withTx(tx => { const state = read(tx); if (state.exercise?.id === exerciseId) save(tx, { ...state, trace: [...snapshot.trace, ...trace] }); });
     }
-    const reply = inference(ctx, model, messages);
-    const output = JSON.parse((reply.content || '').replace(/^```(?:json)?\s*|\s*```$/g, '')) as { feedback: string; cue: string };
+    const finalTool = definition('personalize_feedback', 'Save two short feedback sentences and exactly one coaching cue for the next exercise.');
+    finalTool.function.parameters = {
+      type: 'object', additionalProperties: false, required: ['feedback', 'cue'],
+      properties: {
+        feedback: { type: 'string', description: 'One or two short sentences grounded in the recorded decision, at most 600 characters.' },
+        cue: { type: 'string', enum: ['pause', 'question', 'verify'] },
+      },
+    };
+    const reply = inference(ctx, model, messages, finalTool);
+    const finalCall = reply.tool_calls?.[0];
+    if (reply.tool_calls?.length !== 1 || finalCall?.function.name !== 'personalize_feedback') throw new Error('Model did not return the structured coaching tool call.');
+    const output = JSON.parse(finalCall.function.arguments) as { feedback: string; cue: string };
     if (typeof output.feedback !== 'string' || output.feedback.length < 10 || output.feedback.length > 600 || !['pause', 'question', 'verify'].includes(output.cue)) throw new Error('Model coaching did not match the bounded output format.');
     ctx.withTx(tx => {
       const state = read(tx);

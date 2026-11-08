@@ -48,12 +48,17 @@ try {
     await route.fulfill({ status: 200, contentType, body: await readFile(file) });
   });
   await preview.goto('https://preview.test/');
-  await preview.getByText(/Browser practice · saved on this device/).waitFor();
-  await preview.getByRole('button', { name: 'Start training', exact: true }).click();
-  await preview.getByRole('button', { name: /Do what they ask/ }).click();
-  await preview.getByRole('heading', { name: 'A useful moment to pause.' }).waitFor();
+  await preview.getByRole('heading', { name: 'Training server unavailable' }).waitFor();
+  assert.equal(await preview.getByRole('button', { name: 'Start training', exact: true }).count(), 0);
+  assert.equal(await preview.getByRole('button', { name: 'Browser practice' }).count(), 0);
+  await preview.evaluate(() => localStorage.setItem('signal-school-practice-v1', JSON.stringify({version:1,scores:{authority:100,urgency:100,verification:100},history:[],trace:[]})));
   await preview.reload();
-  await preview.getByRole('heading', { name: 'A useful moment to pause.' }).waitFor();
-  await preview.getByText('STANDARD GUIDANCE', { exact: true }).waitFor();
-  console.log('PASS: production static preview has explicit browser-only labeling and persists practice across reload');
+  await preview.getByRole('heading', { name: 'Training server unavailable' }).waitFor();
+  console.log('PASS: unconfigured production site cannot train or load legacy browser-only progress');
+  await page.routeWebSocket('**/v1/database/**', socket => socket.close());
+  await page.reload();
+  await page.getByRole('heading', { name: 'Training server unavailable' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Browser practice' }).count(), 0);
+  await page.unrouteAll();
+  console.log('PASS: failed server connection offers no local simulation');
 } finally { await browser.close(); }
