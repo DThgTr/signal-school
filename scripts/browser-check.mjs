@@ -10,7 +10,11 @@ if (process.argv.includes('--auth-stdin')) {
   process.stdin.setRawMode?.(true);
   console.log('Ready for hidden authentication JSON on stdin.');
   let input = '';
-  for await (const chunk of process.stdin) { input += chunk; if (input.includes('\n')) break; }
+  for await (const chunk of process.stdin) {
+    input += chunk;
+    if (input.includes('\u0003')) process.exit(130);
+    if (input.includes('\n') || input.includes('\r')) break;
+  }
   process.stdin.setRawMode?.(false);
   bearer = JSON.parse(input).bearer;
 }
