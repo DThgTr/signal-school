@@ -6,7 +6,7 @@ dist/
 .tools/
 .runtime/
 .spacetime/
-.openai/.local/
+.openai/
 spacetime.local.json
 *.log
 *.zip
